@@ -114,6 +114,10 @@
           <span>새 예약 등록</span>
         </button>
 
+        <button id="btn-refresh" class="p-1.5 border border-slate-200 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition shadow-xs" title="새로고침">
+          <i data-lucide="rotate-cw" class="w-4 h-4"></i>
+        </button>
+
         <button id="btn-lock" class="p-1.5 border border-slate-200 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition shadow-xs" title="화면 잠금">
           <i data-lucide="lock" class="w-4 h-4"></i>
         </button>
@@ -134,7 +138,13 @@
     </div>
 
     <!-- Calendar Full Viewport Card -->
-    <div class="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden">
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden relative">
+      <!-- 로딩 인디케이터 오버레이 -->
+      <div id="loading-spinner" class="absolute inset-0 bg-white/70 backdrop-blur-2xs z-20 flex items-center justify-center gap-2 text-indigo-600 font-semibold text-xs">
+        <i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i>
+        <span>일정을 동기화하는 중...</span>
+      </div>
+
       <!-- Weekday Header -->
       <div class="grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-center text-xs font-semibold text-slate-600 py-2 flex-none">
         <span class="text-rose-500">일</span>
@@ -205,7 +215,7 @@
 
         <div>
           <label class="block text-xs font-bold text-slate-700 mb-1">사용 목적 <span class="text-rose-500">*</span></label>
-          <input type="text" id="modal-purpose" placeholder="주간 팀 스프린트 회의" required class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+          <input type="text" id="modal-purpose" placeholder="주간 팀 회의" required class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none">
         </div>
 
         <div id="modal-error-banner" class="hidden p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs flex items-center gap-2">
@@ -217,8 +227,8 @@
           <button type="button" id="btn-cancel-modal" class="px-4 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 transition">
             취소
           </button>
-          <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs transition">
-            예약 확정
+          <button type="submit" id="btn-submit-booking" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs transition flex items-center gap-1.5">
+            <span>예약 확정</span>
           </button>
         </div>
       </form>
@@ -258,6 +268,10 @@
   <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
   <script>
+    // ================= [설정] 구글 Apps Script Web App URL =================
+    // Step 2에서 배포하고 얻은 웹 앱 URL을 아래 따옴표 사이에 붙여넣으세요.
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxc_PGBpn41QszWWIwpEevkhA79-iZdi6C1sy6GoLZ6Vw8f-7MKPJl7LYrGY411Do2SUw/exec';
+
     // ================= [보안] 비밀번호 로직 (기본: 1234) =================
     const CORRECT_HASH = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4";
 
@@ -309,8 +323,6 @@
       { id: 'FAC_4', name: '다목적 라운지 (별관 2F)', color: 'amber', bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', tag: 'bg-amber-500' },
     ];
 
-    const STORAGE_KEY = 'facility_calendar_reservations_v1';
-    
     let currentDate = new Date();
     let selectedDateStr = null;
     let selectedFacilityFilter = 'ALL';
@@ -323,65 +335,92 @@
       return `${y}-${m}-${d}`;
     }
 
-    function loadInitialReservations() {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        try {
-          reservations = JSON.parse(stored);
-          return;
-        } catch (e) {
-          console.error('Failed to parse localStorage data', e);
-        }
+    // [구글 시트 연동] 전체 예약 불러오기
+    async function fetchReservations() {
+      const spinner = document.getElementById('loading-spinner');
+      if (spinner) spinner.classList.remove('hidden');
+
+      try {
+        const response = await fetch(SCRIPT_URL);
+        const data = await response.json();
+        
+        // 날짜 형식 정리 (yyyy-MM-dd)
+        reservations = (data || []).map(r => {
+          if (r.date && r.date.length > 10) {
+            r.date = r.date.substring(0, 10);
+          }
+          return r;
+        });
+
+        renderCalendar();
+        renderRecentBookings();
+        if (selectedDateStr) openDayDrawer(selectedDateStr);
+      } catch (err) {
+        console.error('구글 시트 데이터 로드 실패:', err);
+        showToast('일정을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.', 'error');
+      } finally {
+        if (spinner) spinner.classList.add('hidden');
       }
-
-      const today = new Date();
-      const tKey = formatDateKey(today);
-      
-      const tomorrow = new Date(today);
-      tomorrow.setDate(today.getDate() + 1);
-      const tmKey = formatDateKey(tomorrow);
-
-      const now = Date.now();
-      reservations = [
-        {
-          id: 'res_' + now + '_1',
-          facilityId: 'FAC_1',
-          date: tKey,
-          startTime: '10:00',
-          endTime: '11:30',
-          reserver: '김철수',
-          department: '전략기획팀',
-          purpose: '2026 하반기 전략 회의',
-          createdAt: new Date(now - 300000).toISOString()
-        },
-        {
-          id: 'res_' + now + '_2',
-          facilityId: 'FAC_2',
-          date: tKey,
-          startTime: '14:00',
-          endTime: '15:30',
-          reserver: '이영희',
-          department: '프로덕트팀',
-          purpose: 'UI/UX 디자인 스프린트 리뷰',
-          createdAt: new Date(now - 150000).toISOString()
-        },
-        {
-          id: 'res_' + now + '_3',
-          facilityId: 'FAC_3',
-          date: tmKey,
-          startTime: '13:00',
-          endTime: '15:00',
-          reserver: '박지민',
-          department: '마케팅팀',
-          purpose: '신규 홍보 영상 촬영',
-          createdAt: new Date(now).toISOString()
-        }
-      ];
-      saveReservations();
     }
 
-    function saveReservations() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(reservations));
+    // [구글 시트 연동] 새 예약 등록하기
+    async function saveBookingToServer(newBooking) {
+      const btn = document.getElementById('btn-submit-booking');
+      const originText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> 저장 중...';
+      lucide.createIcons();
+
+      try {
+        await fetch(SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors', // Apps Script 통신 필수 설정
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'create', data: newBooking })
+        });
+
+        reservations.push(newBooking);
+        closeBookingModal();
+        renderCalendar();
+        renderRecentBookings();
+        showToast('성공적으로 예약이 확정되었습니다.');
+
+        if (selectedDateStr === newBooking.date) {
+          openDayDrawer(newBooking.date);
+        }
+      } catch (err) {
+        console.error('구글 시트 저장 실패:', err);
+        showToast('예약 저장 중 통신 오류가 발생했습니다.', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originText;
+        lucide.createIcons();
+      }
+    }
+
+    // [구글 시트 연동] 예약 취소하기
+    async function cancelBooking(id) {
+      if (!confirm('정말 이 예약을 취소하시겠습니까?')) return;
+
+      try {
+        await fetch(SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'delete', id: id })
+        });
+
+        reservations = reservations.filter(r => r.id !== id);
+        showToast('예약이 취소되었습니다.', 'info');
+        renderCalendar();
+        renderRecentBookings();
+        if (selectedDateStr) {
+          openDayDrawer(selectedDateStr);
+        }
+      } catch (err) {
+        console.error('구글 시트 취소 실패:', err);
+        showToast('취소 처리 중 오류가 발생했습니다.', 'error');
+      }
     }
 
     function initFacilityUI() {
@@ -399,17 +438,14 @@
         optModal.textContent = fac.name;
         modalSelect.appendChild(optModal);
       });
-
-      renderRecentBookings();
     }
 
-    // 최근 추가된 일정을 최신순(맨 왼쪽이 가장 최신)으로 표시
+    // 최근 추가된 일정을 상단에 최신순(맨 왼쪽이 가장 최신)으로 표시
     function renderRecentBookings() {
       const container = document.getElementById('facility-legend-container');
       if (!container) return;
       container.innerHTML = '';
 
-      // createdAt 내림차순(최신순) 정렬 후 최대 6개 추출
       const recentList = [...reservations]
         .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
         .slice(0, 6);
@@ -424,11 +460,10 @@
         const badge = document.createElement('button');
         badge.type = 'button';
         badge.className = `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${fac.bg} ${fac.text} border ${fac.border} hover:opacity-80 transition shadow-2xs cursor-pointer shrink-0`;
-        badge.title = `${b.date} ${b.startTime}~${b.endTime} (${b.reserver}) - 클릭 시 해당 날짜 일정 보기`;
+        badge.title = `${b.date} ${b.startTime}~${b.endTime} (${b.reserver}) - 클릭 시 해당 일자 보기`;
 
-        // 가장 최신 1개는 NEW 라벨 부착
         const statusBadge = idx === 0 
-          ? '<span class="px-1 py-0.2 text-[9px] bg-rose-500 text-white font-bold rounded">NEW</span>'
+          ? '<span class="px-1 py-0.2 text-[9px] bg-rose-500 text-white font-bold rounded">NEW</span>' 
           : `<span class="w-1.5 h-1.5 rounded-full ${fac.tag}"></span>`;
 
         badge.innerHTML = `
@@ -438,7 +473,6 @@
           <span class="text-[10px] opacity-75 font-normal">(${b.reserver})</span>
         `;
 
-        // 클릭 시 해당 날짜로 달력 이동 및 상세 Drawer 열기
         badge.addEventListener('click', () => {
           const [y, m] = b.date.split('-');
           currentDate = new Date(parseInt(y), parseInt(m) - 1, 1);
@@ -467,24 +501,23 @@
 
       const grid = document.getElementById('calendar-grid');
       grid.innerHTML = '';
-      
       grid.style.gridTemplateRows = `repeat(${totalRows}, minmax(0, 1fr))`;
 
-      // 이전 달 날짜
+      // 이전 달
       for (let i = firstDayOfMonth - 1; i >= 0; i--) {
         const dayNum = totalDaysInPrevMonth - i;
         const cell = createDayCell(new Date(year, month - 1, dayNum), true);
         grid.appendChild(cell);
       }
 
-      // 이번 달 날짜
+      // 이번 달
       for (let d = 1; d <= totalDaysInMonth; d++) {
         const dayDate = new Date(year, month, d);
         const cell = createDayCell(dayDate, false);
         grid.appendChild(cell);
       }
 
-      // 다음 달 날짜
+      // 다음 달
       const remainingCells = (totalRows * 7) - totalCells;
       for (let n = 1; n <= remainingCells; n++) {
         const cell = createDayCell(new Date(year, month + 1, n), true);
@@ -651,17 +684,6 @@
       }, 250);
     }
 
-    function cancelBooking(id) {
-      reservations = reservations.filter(r => r.id !== id);
-      saveReservations();
-      showToast('예약이 취소되었습니다.', 'info');
-      renderCalendar();
-      renderRecentBookings(); // 상단 최신순 바 갱신
-      if (selectedDateStr) {
-        openDayDrawer(selectedDateStr);
-      }
-    }
-
     function openBookingModal(defaultDate = null) {
       const modal = document.getElementById('booking-modal');
       const errorBanner = document.getElementById('modal-error-banner');
@@ -695,14 +717,16 @@
       const toast = document.createElement('div');
       
       const isError = type === 'error';
-      toast.className = `pointer-events-auto flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-lg border text-xs sm:text-sm font-semibold transition-all duration-300 transform translate-y-3 opacity-0 ${
-        isError 
-          ? 'bg-rose-50 border-rose-200 text-rose-700' 
-          : 'bg-slate-900 border-slate-800 text-white'
-      }`;
+      const isInfo = type === 'info';
+      
+      let colorClass = 'bg-slate-900 border-slate-800 text-white';
+      if (isError) colorClass = 'bg-rose-50 border-rose-200 text-rose-700';
+      if (isInfo) colorClass = 'bg-indigo-50 border-indigo-200 text-indigo-700';
+
+      toast.className = `pointer-events-auto flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-lg border text-xs sm:text-sm font-semibold transition-all duration-300 transform translate-y-3 opacity-0 ${colorClass}`;
 
       toast.innerHTML = `
-        <i data-lucide="${isError ? 'alert-circle' : 'check-circle-2'}" class="w-4 h-4 shrink-0"></i>
+        <i data-lucide="${isError ? 'alert-circle' : (isInfo ? 'info' : 'check-circle-2')}" class="w-4 h-4 shrink-0"></i>
         <span>${message}</span>
       `;
 
@@ -721,15 +745,18 @@
 
     document.addEventListener('DOMContentLoaded', () => {
       checkAuth();
-      loadInitialReservations();
       initFacilityUI();
-      renderCalendar();
+      fetchReservations(); // 구글 시트에서 최신 예약 불러오기
 
       window.addEventListener('resize', () => {
         renderCalendar();
       });
 
       document.getElementById('btn-lock').addEventListener('click', lockApp);
+      document.getElementById('btn-refresh').addEventListener('click', () => {
+        fetchReservations();
+        showToast('일정을 새로고침했습니다.', 'info');
+      });
 
       document.getElementById('btn-prev-month').addEventListener('click', () => {
         currentDate.setMonth(currentDate.getMonth() - 1);
@@ -801,17 +828,8 @@
           createdAt: new Date().toISOString()
         };
 
-        reservations.push(newBooking);
-        saveReservations();
-
-        closeBookingModal();
-        renderCalendar();
-        renderRecentBookings(); // 상단 최신순 바 갱신
-        showToast('성공적으로 예약이 확정되었습니다.');
-
-        if (selectedDateStr === date) {
-          openDayDrawer(date);
-        }
+        // 구글 시트로 저장
+        saveBookingToServer(newBooking);
       });
 
       lucide.createIcons();
