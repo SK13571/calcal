@@ -124,8 +124,14 @@
 
   <!-- Full-Screen Main Content -->
   <main class="w-full flex-1 flex flex-col p-2 sm:p-3 overflow-hidden">
-    <!-- Facility Legends -->
-    <div id="facility-legend-container" class="flex flex-wrap items-center gap-2 mb-2 text-xs font-medium flex-none px-1"></div>
+    <!-- 최근 추가된 일정 바 (최신순 정렬) -->
+    <div class="flex items-center gap-2 mb-2 text-xs font-medium flex-none px-1 overflow-x-auto scrollbar-thin py-0.5">
+      <span class="text-slate-400 font-bold shrink-0 flex items-center gap-1 text-[11px]">
+        <i data-lucide="sparkles" class="w-3.5 h-3.5 text-indigo-500"></i>
+        최근 등록
+      </span>
+      <div id="facility-legend-container" class="flex items-center gap-2 shrink-0"></div>
+    </div>
 
     <!-- Calendar Full Viewport Card -->
     <div class="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden">
@@ -140,7 +146,7 @@
         <span class="text-blue-500">토</span>
       </div>
 
-      <!-- Calendar Days Grid: Uses CSS Grid to expand and fill exactly 100% of remaining height -->
+      <!-- Calendar Days Grid -->
       <div id="calendar-grid" class="grid grid-cols-7 flex-1 divide-x divide-y divide-slate-100 bg-slate-200 overflow-hidden">
         <!-- Rendered via JavaScript -->
       </div>
@@ -335,9 +341,10 @@
       tomorrow.setDate(today.getDate() + 1);
       const tmKey = formatDateKey(tomorrow);
 
+      const now = Date.now();
       reservations = [
         {
-          id: 'res_' + Date.now() + '_1',
+          id: 'res_' + now + '_1',
           facilityId: 'FAC_1',
           date: tKey,
           startTime: '10:00',
@@ -345,10 +352,10 @@
           reserver: '김철수',
           department: '전략기획팀',
           purpose: '2026 하반기 전략 회의',
-          createdAt: new Date().toISOString()
+          createdAt: new Date(now - 300000).toISOString()
         },
         {
-          id: 'res_' + Date.now() + '_2',
+          id: 'res_' + now + '_2',
           facilityId: 'FAC_2',
           date: tKey,
           startTime: '14:00',
@@ -356,10 +363,10 @@
           reserver: '이영희',
           department: '프로덕트팀',
           purpose: 'UI/UX 디자인 스프린트 리뷰',
-          createdAt: new Date().toISOString()
+          createdAt: new Date(now - 150000).toISOString()
         },
         {
-          id: 'res_' + Date.now() + '_3',
+          id: 'res_' + now + '_3',
           facilityId: 'FAC_3',
           date: tmKey,
           startTime: '13:00',
@@ -367,7 +374,7 @@
           reserver: '박지민',
           department: '마케팅팀',
           purpose: '신규 홍보 영상 촬영',
-          createdAt: new Date().toISOString()
+          createdAt: new Date(now).toISOString()
         }
       ];
       saveReservations();
@@ -380,7 +387,6 @@
     function initFacilityUI() {
       const filterSelect = document.getElementById('facility-filter');
       const modalSelect = document.getElementById('modal-facility');
-      const legendContainer = document.getElementById('facility-legend-container');
 
       FACILITIES.forEach(fac => {
         const optFilter = document.createElement('option');
@@ -392,12 +398,58 @@
         optModal.value = fac.id;
         optModal.textContent = fac.name;
         modalSelect.appendChild(optModal);
-
-        const tag = document.createElement('div');
-        tag.className = `flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${fac.bg} ${fac.text} border ${fac.border}`;
-        tag.innerHTML = `<span class="w-2 h-2 rounded-full ${fac.tag}"></span>${fac.name}`;
-        legendContainer.appendChild(tag);
       });
+
+      renderRecentBookings();
+    }
+
+    // 최근 추가된 일정을 최신순(맨 왼쪽이 가장 최신)으로 표시
+    function renderRecentBookings() {
+      const container = document.getElementById('facility-legend-container');
+      if (!container) return;
+      container.innerHTML = '';
+
+      // createdAt 내림차순(최신순) 정렬 후 최대 6개 추출
+      const recentList = [...reservations]
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+        .slice(0, 6);
+
+      if (recentList.length === 0) {
+        container.innerHTML = '<span class="text-slate-400 text-xs">최근 등록된 예약 일정이 없습니다.</span>';
+        return;
+      }
+
+      recentList.forEach((b, idx) => {
+        const fac = FACILITIES.find(f => f.id === b.facilityId) || FACILITIES[0];
+        const badge = document.createElement('button');
+        badge.type = 'button';
+        badge.className = `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${fac.bg} ${fac.text} border ${fac.border} hover:opacity-80 transition shadow-2xs cursor-pointer shrink-0`;
+        badge.title = `${b.date} ${b.startTime}~${b.endTime} (${b.reserver}) - 클릭 시 해당 날짜 일정 보기`;
+
+        // 가장 최신 1개는 NEW 라벨 부착
+        const statusBadge = idx === 0 
+          ? '<span class="px-1 py-0.2 text-[9px] bg-rose-500 text-white font-bold rounded">NEW</span>'
+          : `<span class="w-1.5 h-1.5 rounded-full ${fac.tag}"></span>`;
+
+        badge.innerHTML = `
+          ${statusBadge}
+          <span class="font-bold">[${b.date.slice(5)}]</span>
+          <span class="max-w-[120px] truncate">${b.purpose}</span>
+          <span class="text-[10px] opacity-75 font-normal">(${b.reserver})</span>
+        `;
+
+        // 클릭 시 해당 날짜로 달력 이동 및 상세 Drawer 열기
+        badge.addEventListener('click', () => {
+          const [y, m] = b.date.split('-');
+          currentDate = new Date(parseInt(y), parseInt(m) - 1, 1);
+          renderCalendar();
+          openDayDrawer(b.date);
+        });
+
+        container.appendChild(badge);
+      });
+
+      lucide.createIcons();
     }
 
     function renderCalendar() {
@@ -416,24 +468,23 @@
       const grid = document.getElementById('calendar-grid');
       grid.innerHTML = '';
       
-      // Dynamic grid row calculation to fill exact viewport height
       grid.style.gridTemplateRows = `repeat(${totalRows}, minmax(0, 1fr))`;
 
-      // Previous month days
+      // 이전 달 날짜
       for (let i = firstDayOfMonth - 1; i >= 0; i--) {
         const dayNum = totalDaysInPrevMonth - i;
         const cell = createDayCell(new Date(year, month - 1, dayNum), true);
         grid.appendChild(cell);
       }
 
-      // Current month days
+      // 이번 달 날짜
       for (let d = 1; d <= totalDaysInMonth; d++) {
         const dayDate = new Date(year, month, d);
         const cell = createDayCell(dayDate, false);
         grid.appendChild(cell);
       }
 
-      // Next month days
+      // 다음 달 날짜
       const remainingCells = (totalRows * 7) - totalCells;
       for (let n = 1; n <= remainingCells; n++) {
         const cell = createDayCell(new Date(year, month + 1, n), true);
@@ -485,7 +536,6 @@
       const eventsList = document.createElement('div');
       eventsList.className = 'flex-1 space-y-1 overflow-y-auto scrollbar-thin pr-0.5';
 
-      // Can show more reservations now that cells fill screen height
       const maxVisible = 5;
       dayBookings.slice(0, maxVisible).forEach(b => {
         const fac = FACILITIES.find(f => f.id === b.facilityId) || FACILITIES[0];
@@ -606,6 +656,7 @@
       saveReservations();
       showToast('예약이 취소되었습니다.', 'info');
       renderCalendar();
+      renderRecentBookings(); // 상단 최신순 바 갱신
       if (selectedDateStr) {
         openDayDrawer(selectedDateStr);
       }
@@ -674,7 +725,6 @@
       initFacilityUI();
       renderCalendar();
 
-      // Window resize re-render to keep exact viewport distribution
       window.addEventListener('resize', () => {
         renderCalendar();
       });
@@ -756,6 +806,7 @@
 
         closeBookingModal();
         renderCalendar();
+        renderRecentBookings(); // 상단 최신순 바 갱신
         showToast('성공적으로 예약이 확정되었습니다.');
 
         if (selectedDateStr === date) {
