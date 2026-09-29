@@ -139,7 +139,7 @@
 
     <!-- Calendar Full Viewport Card -->
     <div class="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden relative">
-      <!-- 로딩 인디케이터 오버레이 -->
+      <!-- 로딩 오버레이 -->
       <div id="loading-spinner" class="absolute inset-0 bg-white/70 backdrop-blur-2xs z-20 flex items-center justify-center gap-2 text-indigo-600 font-semibold text-xs">
         <i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i>
         <span>일정을 동기화하는 중...</span>
@@ -158,7 +158,7 @@
 
       <!-- Calendar Days Grid -->
       <div id="calendar-grid" class="grid grid-cols-7 flex-1 divide-x divide-y divide-slate-100 bg-slate-200 overflow-hidden">
-        <!-- Rendered via JavaScript -->
+        <!-- JS 렌더링 -->
       </div>
     </div>
   </main>
@@ -235,7 +235,7 @@
     </div>
   </div>
 
-  <!-- Drawer (Full Height Right Sidebar) -->
+  <!-- Drawer (일정 상세 서랍) -->
   <div id="day-drawer-backdrop" class="fixed inset-0 z-40 bg-slate-900/30 backdrop-blur-xs hidden transition-opacity">
     <div id="day-drawer" class="absolute right-0 top-0 bottom-0 w-full max-w-xl bg-white shadow-2xl flex flex-col transform translate-x-full transition-transform duration-300 ease-in-out">
       
@@ -269,8 +269,7 @@
 
   <script>
     // ================= [설정] 구글 Apps Script Web App URL =================
-    // Step 2에서 배포하고 얻은 웹 앱 URL을 아래 따옴표 사이에 붙여넣으세요.
-    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxc_PGBpn41QszWWIwpEevkhA79-iZdi6C1sy6GoLZ6Vw8f-7MKPJl7LYrGY411Do2SUw/exec';
+    const SCRIPT_URL = 'https://script.google.com/macros/s/여기에_배포한_URL을_입력하세요/exec';
 
     // ================= [보안] 비밀번호 로직 (기본: 1234) =================
     const CORRECT_HASH = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4";
@@ -335,6 +334,21 @@
       return `${y}-${m}-${d}`;
     }
 
+    // 시간 문자열 정제 함수 (1899-12-30T... 또는 10:00:00 형식을 무조건 HH:mm 으로 통일)
+    function sanitizeTime(t) {
+      if (!t) return '';
+      const str = String(t).trim();
+      if (str.includes('T')) {
+        const d = new Date(str);
+        if (!isNaN(d.getTime())) {
+          const hh = String(d.getHours()).padStart(2, '0');
+          const mm = String(d.getMinutes()).padStart(2, '0');
+          return `${hh}:${mm}`;
+        }
+      }
+      return str.substring(0, 5);
+    }
+
     // [구글 시트 연동] 전체 예약 불러오기
     async function fetchReservations() {
       const spinner = document.getElementById('loading-spinner');
@@ -344,11 +358,12 @@
         const response = await fetch(SCRIPT_URL);
         const data = await response.json();
         
-        // 날짜 형식 정리 (yyyy-MM-dd)
         reservations = (data || []).map(r => {
           if (r.date && r.date.length > 10) {
             r.date = r.date.substring(0, 10);
           }
+          r.startTime = sanitizeTime(r.startTime);
+          r.endTime = sanitizeTime(r.endTime);
           return r;
         });
 
@@ -374,7 +389,7 @@
       try {
         await fetch(SCRIPT_URL, {
           method: 'POST',
-          mode: 'no-cors', // Apps Script 통신 필수 설정
+          mode: 'no-cors',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'create', data: newBooking })
         });
@@ -746,7 +761,7 @@
     document.addEventListener('DOMContentLoaded', () => {
       checkAuth();
       initFacilityUI();
-      fetchReservations(); // 구글 시트에서 최신 예약 불러오기
+      fetchReservations();
 
       window.addEventListener('resize', () => {
         renderCalendar();
@@ -828,7 +843,6 @@
           createdAt: new Date().toISOString()
         };
 
-        // 구글 시트로 저장
         saveBookingToServer(newBooking);
       });
 
